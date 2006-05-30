@@ -9,7 +9,8 @@ WriteMakefile(
 				'XML::Simple' => '0',
 				'Data::Dumper' => '0',
 				'LWP::Simple' => '0',
-				'Hey::Common' => '0',
+				'Hey::Common' => '0.01',
+				'Hey::Cache' => '0.01',
 			},
     ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
       (ABSTRACT_FROM  => 'lib/WWW/GameMonitor.pm', # retrieve abstract from module
