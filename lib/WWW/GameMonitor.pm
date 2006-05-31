@@ -1,6 +1,6 @@
 package WWW::GameMonitor;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use XML::Simple;
 use Data::Dumper;
@@ -53,6 +53,8 @@ You can specify several options in the constructor.
       CacheFile => 'my_gm_cache.xml',
       DebugLog => 'my_debug_log.txt',
       DebugLevel => 3,
+      UID => 12345,
+      List => 0,
   );
 
 =head3 Expires [optional]
@@ -83,6 +85,14 @@ greater than zero (zero is default).
 
 Sets the level of debugging.  The larger the number, the more verbose the logging.  This is zero by default, which means no logging at all.
 
+=head3 UID [optional]
+
+Sets the default UID used for fetching buddy lists.
+
+=head3 List [optional]
+
+Sets the default buddy list used for fetching buddy lists.
+
 =cut
 
 sub new {
@@ -104,6 +114,9 @@ sub new {
 
   $self->{host} = $options{Host} || undef;
   $self->{port} = $options{Port} || undef;
+
+  $self->{uid} = (defined($options{UID}) ? $options{UID} : 0);
+  $self->{buddyList} = (defined($options{List}) ? $options{List} : 0);
 
   $self->__debug(7, 'Object Attributes:', Dumper($self));
 
@@ -202,6 +215,77 @@ sub getServerInfo {
   my $port = $options{Port} || $self->{port} || return undef; # if the port isn't defined, get the default or fail
   my $data = $self->__fetchServerInfo( Host => $host, Port => $port ); # fetch it!
   return $data; # return the post-processed server info
+}
+
+=cut
+
+=head2 getBuddyList
+
+  $list = $gm->getBuddyList; # uses defaults set in the constructor
+  $list = $gm->getBuddyList( List => 1 ); # sets a different list than the default
+  $list = $gm->getBuddyList( UID => 12345, List => 2 ); # also sets a different UID along with a different list
+
+=head3 UID [required]
+
+Sets the UID used for fetching buddy lists.  If this was specified in the constructor, this value is optional.
+
+=head3 List [required]
+
+Sets the buddy list used for fetching buddy lists.  If this was specified in the constructor, this value is optional.
+
+=cut
+
+sub getBuddyList {
+  my $self = shift || return undef;
+  my %options = @_;
+
+  $self->__debug(4, 'getBuddyList');
+
+  my $uid = (defined($options{UID}) ? $options{UID} : (defined($self->{uid}) ? $self->{uid} : return undef));
+  my $list = (defined($options{List}) ? $options{List} : (defined($self->{buddyList}) ? $self->{buddyList} : return undef));
+
+  my $name = "BuddyList:${uid}:${list}"; # make a pretty name
+
+  $self->__debug(4, 'getBuddyList('.$name.')');
+
+  my $cache = $self->{cache}->get( Name => $name ); # get data from cache
+  if ($cache) { # cache is still fresh
+    $self->__debug(3, 'Cache data is fresh.');
+    return $cache; # return the still fresh cache
+  }
+  else { # cache is stale
+    $self->__debug(2, 'Cache is not fresh or no data.  Fetching from source.');
+    my $url = qq(http://www.game-monitor.com/client/buddyList.php?uid=$uid&listid=$list&xml=1); # format the url for the source
+    my $response = get($url); # fetch the info from the source
+    if ($response) { # fetching from source succeeded
+      my $data = XMLin($response, KeyAttr => undef); # parse the xml into hashref
+
+      my $buddies = $self->{fxn}->forceArray($data->{buddy}); # make sure buddies is an arrayref
+      delete($data->{buddy});
+      foreach my $buddy (@{$buddies}) { # loop through the returned players
+        if ($buddy->{server}->{fullip} eq '0.0.0.0:') { # no valid server, remove it
+          $buddy->{server} = {}; # wipe it out
+        }
+        $data->{player}->{$buddy->{name}} = $buddy; # add this player to the list of players
+      }
+
+      $self->{cache}->set( Name => $name, Value => $data ); # store it away into the cache
+      return $data; # return the new, fresh data
+    }
+    else { # fetching from source failed (rejected, bad connection, etc)
+      $self->__debug(2, 'Could not fetch data from source.');
+      $cache = $self->{cache}->get( Name => $name, Expires => 99999999 ); # get data from cache, ignoring expiration
+      if ($cache) {
+        $self->__debug(2, 'Going to provide stale cache data instead of failing.');
+        return $cache; # return the old, stale cache
+      }
+      else {
+        $self->__debug(3, 'There is no cache data to return.');
+        return undef; # nothing to return
+      }
+    }
+  }
+  
 }
 
 =cut
